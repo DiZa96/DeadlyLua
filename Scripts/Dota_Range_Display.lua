@@ -52,7 +52,6 @@ function Tick(tick)
 	
 	if activated1 then
 		if xx == 180 and yy == 80 then LoadGUIConfig() end
-		if xx == nil and yy == nil then xx=180 yy = 80 end
 		if move == true then
 			xx,yy = client.mouseScreenPosition.x - 39*global/2 - 20,client.mouseScreenPosition.y + 15
 		end
