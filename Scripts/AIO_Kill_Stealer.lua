@@ -9,11 +9,13 @@ config = ScriptConfig.new()
 config:SetParameter("Active", "Z", config.TYPE_HOTKEY)
 config:SetParameter("GlobalKey", "H", config.TYPE_HOTKEY)
 config:SetParameter("AutoGlobalSpells", false)
+config:SetParameter("MinTarget4AutoKill", 2)
 config:Load()
 
 local toggleKey = config.Active
 local ComboKey = config.GlobalKey
 local AutoGlobal = config.AutoGlobalSpells
+local GlobalCount = config.MinTarget4AutoKill
 local xx = nil
 local yy = nil
 
@@ -33,7 +35,7 @@ end
 
 --Stuff
 local hero = {} local heroG = {} local note = {} local play = false local combo = false
-local activ = true local draw = true local myhero = nil local dmgg = nil
+local activ = true local draw = true local myhero = nil local dmgg = nil local mine = {}
 
 --Draw function
 local shft = client.screenSize.x/1600
@@ -364,7 +366,7 @@ function KillGlobal(me,ability,damage,adamage,target,comp)
 	local count = {}
 	if Spell.level > 0 then	
 		local refresh = me:FindItem("item_refresher")
-		local refresher = refresh and refresh:CanBeCasted()
+		local refresher = refresh and refresh:CanBeCasted() and me.mana > Spell.manacost*2 + refresh.manacost
 		local Dmg = GetDmg(Spell.level,me,damage,adamage)
 		local DmgT = GetDmgType(Spell.dmgType)
 		local CastPoint = Spell:FindCastPoint() + client.latency/1000		
@@ -390,9 +392,6 @@ function KillGlobal(me,ability,damage,adamage,target,comp)
 							GenerateSideMessage(v.name,Spell.name)
 						end
 						if activ and not me:IsChanneling() then
-							if v.meepoIllusion == nil then
-								table.insert(count,v)
-							end
 							if AutoGlobal or combo then
 								if target == 1 then
 									KSCastSpell(Spell,v,me,true)
@@ -405,6 +404,10 @@ function KillGlobal(me,ability,damage,adamage,target,comp)
 									me:SafeCastAbility(Spell)
 									combo = false break
 								end
+							else
+								if v.meepoIllusion == nil then
+									table.insert(count,v)
+								end
 							end
 						end
 					elseif note[hand] then
@@ -416,7 +419,7 @@ function KillGlobal(me,ability,damage,adamage,target,comp)
 			end
 		end
 	end
-	if #count > 1 then
+	if #count >= GlobalCount then
 		if target == 1 then
 			KSCastSpell(Spell,count[1],me,true)
 		elseif target == 2 then
@@ -519,7 +522,9 @@ function KillMines(me,ability,damage,adamage,comp,id)
 		local DmgT = GetDmgType(Spell.dmgType)
 		local CastPoint = Spell:FindCastPoint() + client.latency/1000
 		local Channel = me:IsChanneling()
-		local enemies = entityList:GetEntities({type=LuaEntity.TYPE_HERO,team = 5-me.team})
+		local enemies = entityList:GetEntities({type=LuaEntity.TYPE_HERO,team = 5-me.team})		
+		local mines = entityList:GetEntities(function (v) return v.classId == CDOTA_NPC_TechiesMines and v.alive and v.maxHealth == 200 end)
+		for z,x in ipairs(mines) do if not mine[x.handle] then mine[x.handle] = Dmg end end
 		for i,v in ipairs(enemies) do				
 			if v.healthbarOffset ~= -1 and not v:IsIllusion() then
 				local hand = v.handle
@@ -528,22 +533,26 @@ function KillMines(me,ability,damage,adamage,comp,id)
 				end
 				if v.visible and v.alive and v.health > 0 then
 					heroG[hand].visible = draw
-					local DmgM = ComplexGetDmg(Level,me,v,Dmg,id)					
+					local DmgM = 0 for z,x in ipairs(mines) do if GetDistance2D(x,v) < 425 then	DmgM = DmgM + mine[x.handle] end end
 					local DmgS = math.floor(v:DamageTaken(DmgM,DmgT,me))
-					local DmgF = math.floor(v.health - DmgS + CastPoint*v.healthRegen + MorphMustDie(v,CastPoint))
+					local DmgF = math.floor(v.health - DmgS)
 					heroG[hand].text = " "..DmgF	
-					if DmgF < 0 and KSCanDie(v,me,Spell.manacost,DmgS) then
+					if DmgF < 0 then
 						if not note[hand] then
 							note[hand] = true
 							GenerateSideMessage(v.name,Spell.name)
 						end
-						if activ and not Channel then
-							if v.meepoIllusion == nil then
-								table.insert(count,v)
-							end
+						if activ and not Channel then							
 							if AutoGlobal or combo then
-								KSCastSpell(me:GetAbility(4),v.position,me,false)
-								combo = false break
+								for z,x in ipairs(mines) do
+									if GetDistance2D(x,v) < 425 then
+										x:CastAbility(x:GetAbility(1))																				
+									end
+								end								
+							else
+								if v.meepoIllusion == nil then
+									table.insert(count,v.position)
+								end
 							end
 						end
 					elseif note[hand] then
@@ -554,11 +563,15 @@ function KillMines(me,ability,damage,adamage,comp,id)
 				end
 			end
 		end
+		if #count >= GlobalCount then
+			for z,x in ipairs(mines) do
+				if GetDistance2D(count[1],x) < 425 then
+					x:CastAbility(x:GetAbility(1))
+				end
+			end
+		end
+		combo = false 
 	end
-	if #count > 1 then
-		KSCastSpell(me:GetAbility(4),count[1].position,me,nil)
-	end
-	
 end
 
 function KillLina(lsblock,me,ability,damage,adamage,range,target)
@@ -619,9 +632,9 @@ function RikiKill(lsblock,me,ability,damage,range,target)
 					local DmgF = math.floor(v.health - DmgS - DmgM + CastPoint*v.healthRegen+MorphMustDie(v,CastPoint))
 					hero[hand].text = " "..DmgF
 					hero[hand].color = GetColor(DmgF)
-					if me.activity ~= 424 and activ and not me:IsChanneling() and me:CanAttack() then
+					if not Spell.abilityPhase and activ and not me:IsChanneling() and me:CanAttack() then
 						if DmgF < 0 and GetDistance2D(me,v) < Range and KSCanDie(v,me,Spell.manacost,DmgS+DmgM) then
-							KSCastSpell(Spell,v,me,lsblock) Sleep(1200,"riki") break
+							KSCastSpell(Spell,v,me,lsblock) Sleep(500,"riki") break
 						end
 					end
 				elseif hero[hand].visible then
@@ -891,10 +904,7 @@ function ComplexGetDmg(lvl,me,ent,damage,id)
 		if static > 0 and GetDistance2D(me,ent) < 1000 then 
 			damage = damage + ((hp[static]) * ent.health)
 		end
-		return damage			
-	elseif id == CDOTA_Unit_Hero_Techies then		
-		local mines = entityList:GetEntities(function (v) return v.classId == CDOTA_NPC_TechiesMines and v.alive and v.maxHealth == 200 and v.GetDistance2D(v,ent) < 425 end)
-		return damage * #mines		
+		return damage				
 	end
 end
 
